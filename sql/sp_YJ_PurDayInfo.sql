@@ -1,0 +1,169 @@
+--采购每日跟踪表
+ALTER PROC sp_YJ_PurDayInfo
+	@TempTable VARCHAR(255) = ''
+AS
+BEGIN
+	CREATE TABLE #TEMP(
+		FPurBillID INT,
+		FPurEntryID INT,
+		FPurBillNo VARCHAR(2000), --单据编号 采购订单询价单号
+		FPurDate DATETIME, --日期 采购订单采购日期
+		FSupplierName VARCHAR(2000), --供应商 供应商简称
+		FProgramName VARCHAR(2000),--项目名称 采购订单明细行--项目名称
+		FProgramNumber VARCHAR(2000),--项目编号 采购订单明细行--项目号
+		FMaterialName VARCHAR(2000),--品名 相对应物料名称
+		FSpecification VARCHAR(2000),--规格 相对应物料型号
+		FMaterialCZ VARCHAR(2000),--材质 相对应物料材质管配件
+		FMaterialCZ1 VARCHAR(2000),--材质 相对应物料材质阀门
+		FNote VARCHAR(2000), --备注 采购订单明细行的备注
+		FQty DECIMAL(28,10), --数量 采购订单明细行--数量
+		FBudgetDHDate VARCHAR(255),--预期到货 采购订单明细行交货日期字段
+		FPrice DECIMAL(28,10),--单价 采购订单明细行单价
+		FAmount DECIMAL(28,10),--总价 采购订单明细行价税合计
+		FActDHDate VARCHAR(255),--实际到货期 专配用料清单明细行对实际到货日期
+		FPayType VARCHAR(255),--付款方式 采购订单单据头实际付款条件
+		FQWPayDate VARCHAR(255),--请款日期 对应付款申请单单明细行对应期望付款日期
+		FPayDate VARCHAR(255),--付款日期 对应付款单日期
+		FPayAmount DECIMAL(28,10), --付款金额 对应付款单金额
+		FInvoiveNo VARCHAR(255),--发票号码 对应应付单单据头发票号码
+		FInvoiveRecDate VARCHAR(255),--发票收到日期 应付单业务日期
+		FInvoiveCreateDate VARCHAR(255),--发票开具日 对应应付单发票开具日期
+		FXJBillNo VARCHAR(255),--询价单号
+		)
+	INSERT INTO #TEMP(
+		FPurBillID,FPurEntryID,FPurBillNo,FPurDate,FSupplierName,FProgramName,FProgramNumber
+	   ,FMaterialName,FSpecification,FMaterialCZ,FMaterialCZ1,FNote,FQty,FBudgetDHDate
+	   ,FPrice,FAmount,FPayType,FXJBillNo)
+	SELECT  A.FID,B.FENTRYID,A.FBILLNO,A.FDATE,BSL.FSHORTNAME,D.FNAME,C.FNUMBER
+		   ,BML.FNAME,BML.FSPECIFICATION,BM.F_PDLJ_Text7,F_PDLJ_Text12,B.FNOTE,B.FQTY,CONVERT(VARCHAR(10),BD.FDELIVERYDATE,120)
+		   ,BF.FTaxPrice,BF.FAllAmount,A.F_SHDP_Remarks,A.F_QAPZ_Text
+	  FROM  T_PUR_POORDER A
+			INNER JOIN T_PUR_POORDERENTRY B
+			ON A.FID = B.FID
+			INNER JOIN T_PUR_POORDERENTRY_D BD
+			ON B.FENTRYID = BD.FENTRYID
+			INNER JOIN T_PUR_POORDERENTRY_F BF
+			ON B.FENTRYID = BF.FENTRYID
+			INNER JOIN T_BAS_PREBDONE C
+			ON B.F_qqqq_Base1 = C.FID
+			INNER JOIN T_BAS_PREBDONE_L D
+			ON C.FID = D.FID
+			INNER JOIN T_BD_MATERIAL BM 
+			ON B.FMATERIALID = BM.FMATERIALID
+			INNER JOIN T_BD_MATERIAL_L BML
+			ON B.FMATERIALID = BML.FMATERIALID AND BML.FLOCALEID = 2052
+			LEFT JOIN T_BD_SUPPLIER_L BSL
+			ON A.FSUPPLIERID = BSL.FSUPPLIERID AND BSL.FLOCALEID = 2052
+	 WHERE  1=1
+	   AND  A.FDOCUMENTSTATUS = 'C'
+
+	SELECT  DISTINCT
+			B.FOrderEntryID
+	       ,A.FDATE FInvoiveRecDate
+		   ,A.F_PDLJ_Remarks FInvoiveNo
+		   ,A.F_SHDP_DATE FInvoiveCreateDate
+	  INTO  #PayAble
+	  FROM  T_AP_PAYABLE A
+			INNER JOIN T_AP_PAYABLEENTRY B
+			ON A.FID = B.FID
+	 WHERE  A.FDOCUMENTSTATUS = 'C'
+	   AND  A.FCANCELSTATUS = 'A'
+	   AND  B.FOrderEntryID IN (SELECT FPurEntryID FROM #TEMP)
+
+	SELECT  DISTINCT
+			B.FOrderEntryID
+		   ,B.FEXPECTPAYDATE
+	  INTO  #PayApply
+	  FROM  T_CN_PAYAPPLY A
+			INNER JOIN T_CN_PAYAPPLYENTRY B
+			ON A.FID = B.FID
+	 WHERE  A.FDOCUMENTSTATUS = 'C'
+	   AND  A.FCANCELSTATUS = 'A'
+	   AND  B.FOrderEntryID IN (SELECT FPurEntryID FROM #TEMP)
+
+	SELECT  DISTINCT
+			D.FOrderEntryID
+		   ,A.FDATE
+	  INTO  #PayBill
+	  FROM  T_AP_PAYBILL A
+			INNER JOIN T_AP_PAYBILLSRCENTRY B
+			ON A.FID = B.FID
+			INNER JOIN T_AP_PAYBILLSRCENTRY_LK C
+			ON B.FENTRYID = C.FENTRYID
+			INNER JOIN T_CN_PAYAPPLYENTRY D
+			ON C.FSID = D.FENTRYID AND C.FSBILLID = D.FID
+	 WHERE  A.FDOCUMENTSTATUS = 'C'
+	   AND  A.FCANCELSTATUS = 'A'
+	   AND  B.FOrderEntryID IN (SELECT FPurEntryID FROM #TEMP)
+
+	SELECT  D.FOrderEntryID
+		   ,SUM(B.FREALPAYAMOUNT)FREALPAYAMOUNT
+	  INTO  #PayBillAmount
+	  FROM  T_AP_PAYBILL A
+			INNER JOIN T_AP_PAYBILLSRCENTRY B
+			ON A.FID = B.FID
+			INNER JOIN T_AP_PAYBILLSRCENTRY_LK C
+			ON B.FENTRYID = C.FENTRYID
+			INNER JOIN T_CN_PAYAPPLYENTRY D
+			ON C.FSID = D.FENTRYID AND C.FSBILLID = D.FID
+	 WHERE  A.FDOCUMENTSTATUS = 'C'
+	   AND  A.FCANCELSTATUS = 'A'
+	   AND  B.FOrderEntryID IN (SELECT FPurEntryID FROM #TEMP)
+	 GROUP  BY D.FOrderEntryID
+
+
+	UPDATE  A 
+	   SET  A.FQWPayDate = CONVERT(VARCHAR(10),B.FEXPECTPAYDATE,120)
+	  FROM  #TEMP A
+			INNER JOIN #PayApply B
+			ON A.FPurEntryID = B.FORDERENTRYID
+
+	UPDATE  A 
+	   SET  A.FPayDate = CONVERT(VARCHAR(10),B.FDATE,120)
+	  FROM  #TEMP A
+			INNER JOIN #PayBill B
+			ON A.FPurEntryID = B.FORDERENTRYID
+
+	
+	UPDATE  A 
+	   SET  A.FPayAmount = B.FREALPAYAMOUNT
+	  FROM  #TEMP A
+			INNER JOIN #PayBillAmount B
+			ON A.FPurEntryID = B.FORDERENTRYID
+
+	UPDATE  A 
+	   SET  A.FInvoiveRecDate = CONVERT(VARCHAR(10),B.FInvoiveRecDate,120)
+	       ,A.FInvoiveNo = B.FInvoiveNo
+		   ,A.FInvoiveCreateDate = CONVERT(VARCHAR(10),B.FInvoiveCreateDate,120)
+	  FROM  #TEMP A
+			INNER JOIN #PayAble B
+			ON A.FPurEntryID = B.FORDERENTRYID
+
+	--获取实际发货期
+	UPDATE  A
+	   SET  A.FActDHDate = CONVERT(VARCHAR(10),E.F_QAPZ_DATE1,120)
+	  FROM  #TEMP A
+			INNER JOIN T_PUR_POORDERENTRY_LK B
+			ON A.FPurEntryID = B.FENTRYID
+			INNER JOIN T_PUR_ReqEntry C
+			ON B.FSID = C.FENTRYID AND B.FSBILLID = C.FID
+			INNER JOIN T_PUR_ReqEntry_LK D
+			ON C.FENTRYID = D.FENTRYID
+			INNER JOIN PDLJ_t_MateAllocaEntry E
+			ON D.FSID = E.FEntryID AND D.FSBILLID = E.FID
+
+	SELECT * FROM #TEMP
+
+	IF(@TempTable <> '')
+	BEGIN
+		DECLARE @SQL VARCHAR(2000)
+		SET @SQL = '
+		SELECT ROW_NUMBER() OVER(ORDER BY FPurBillNo DESC) FIDENTITYID,* 
+		  INTO '+@TempTable+'
+		  FROM #TEMP'
+
+		EXECUTE(@SQL)
+	END
+
+	
+END
